@@ -3,6 +3,7 @@ import os
 import stat
 import mimetypes
 
+from datetime import datetime
 from . import hdrs
 from .web_reqrep import StreamResponse
 from .web_exceptions import HTTPMethodNotAllowed, HTTPNotFound, HTTPNotModified
@@ -12,8 +13,10 @@ __all__ = ("DirHandler",)
 
 class DirHandler(object):
 
-    def __init__(self, base_dir, chunk_size=None, response_factory=None):
+    def __init__(self, base_dir, index=True, chunk_size=None,
+                 response_factory=None):
         self._base_dir = os.path.abspath(base_dir)
+        self._index = index
         self._chunk_size = chunk_size or 256 * 1024
         self._response_factory = response_factory or StreamResponse
 
@@ -49,15 +52,13 @@ class DirHandler(object):
         except FileNotFoundError:
             raise HTTPNotFound()
 
-        return path, path_stat
+        return req_path, path, path_stat
 
-    def _head(self, req, path, path_stat):
-        if not stat.S_ISREG(path_stat):
-            raise HTTPNotFound()
-
-        mtime = path_stat.st_mtime
+    def _head_file(self, req, path, path_stat):
         modsince = req.if_modified_since
-        if modsince is not None and mtime <= modsince.timestamp():
+        file_mtime = path_stat.st_mtime
+
+        if modsince is not None and file_mtime <= modsince.timestamp():
             raise HTTPNotModified()
 
         content_type, content_encoding = mimetypes.guess_type(path)
@@ -66,10 +67,62 @@ class DirHandler(object):
         resp.content_type = content_type or "application/octet-stream"
         if content_encoding:
             resp.headers[hdrs.CONTENT_ENCODING] = content_encoding
-        resp.last_modified = mtime
+        resp.last_modified = file_mtime
         resp.content_length = path_stat.st_size
 
         return resp
+
+    def _head_index(self, req, dir_stat):
+        modsince = req.if_modified_since
+        dir_mtime = dir_stat.st_mtime
+
+        if modsince is not None and dir_mtime <= modsince.timestamp():
+            raise HTTPNotModified()
+
+        resp = self._response_factory()
+        resp.content_type = "text/html"
+        resp.charset = "utf-8"
+        resp.last_modified = dir_mtime
+
+        return resp
+
+    def _gen_index_html(self, req_path, dir_path):
+        yield (
+            """<!DOCTYPE><html lang="en">"""
+            "<head>"
+            """<meta charset="utf-8">"""
+            "<title>%s</title>"
+            "</head>"
+            "<body>"
+            "<h1>Index of /%r</h1>"
+            "<hr>"
+            """<table style="width:100%">"""
+        ) % (req_path, req_path)
+
+        yield "<tr><th>Name</th><th>Last Modified</th><th>Size</th></tr>"
+
+        row_tmpl = (
+            """<tr><td><a href="%s">%s</a></td>"""
+            "<td>%s</td><td>%s</td></tr>"
+        )
+
+        for entry in sorted(os.listdir(dir_path)):
+            try:
+                entry_stat = os.stat(os.path.join(dir_path, entry))
+            except FileNotFoundError:
+                continue
+
+            if stat.S_ISREG(entry_stat):
+                size = entry_stat.st_size
+            elif stat.S_ISDIR(entry_stat):
+                size = "-"
+            else:
+                continue
+
+            mtime = datetime.fromtimestampe(entry_stat.st_mtime)
+            yield row_tmpl % (entry, entry, mtime, size)
+
+        yield "</table><hr></body></html>"
 
     def _sendfile_system_cb(self, fut, out_fd, in_fd, offset, count, loop,
                             registered):
@@ -123,22 +176,40 @@ class DirHandler(object):
             yield from fut
 
     def head(self, req):
-        path, path_stat = self._validate_path(req)
-        return self._head(req, path, path_stat)
+        req_path, path, path_stat = self._validate_path(req)
+
+        if stat.S_ISREG(path_stat):
+            return self._head_file(req, path, path_stat)
+        elif self._index and stat.S_ISDIR(path_stat):
+            resp = self._head_index(req, path_stat)
+            return resp
+        else:
+            raise HTTPNotFound()
 
     @asyncio.coroutine
     def get(self, req):
-        path, path_stat = self._validate_path(req)
-        resp = self._head(req, path, path_stat)
+        req_path, path, path_stat = self._validate_path(req)
 
-        try:
-            fobj = open(path, "rb")
-        except FileNotFoundError:  # in case of race condition
-            raise HTTPNotFound()
-        else:
+        if stat.S_ISREG(path_stat):
+            resp = self._head_file(req, path, path_stat)
+            try:
+                fobj = open(path, "rb")
+            except FileNotFoundError:  # in case of race condition
+                raise HTTPNotFound()
+            else:
+                yield from resp.prepare(req)
+                yield from self._sendfile(req, resp, fobj, path_stat.st_size)
+            finally:
+                fobj.close()
+        elif self._index and stat.S_ISDIR(path_stat):
+            resp = self._head_index(req, path_stat)
+            body_gen = self._gen_index_html(req_path, path)
+            body = "".join(body_gen).encode("utf-8")
+            resp.content_length = len(body)
+
             yield from resp.prepare(req)
-            yield from self._sendfile(req, resp, fobj, path_stat.st_size)
-        finally:
-            fobj.close()
+            resp.write(body)
+        else:
+            raise HTTPNotFound()
 
         return resp
