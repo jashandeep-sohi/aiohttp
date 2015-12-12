@@ -191,7 +191,7 @@ class DirHandler(_FileHandlerMixin):
             else:
                 continue
 
-            mtime = datetime.fromtimestampe(entry_stat.st_mtime)
+            mtime = datetime.fromtimestamp(entry_stat.st_mtime)
             yield row_tmpl % (entry, entry, mtime, size)
 
         yield "</table><hr></body></html>"
