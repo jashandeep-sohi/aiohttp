@@ -2,10 +2,12 @@ from . import web_reqrep
 from . import web_exceptions
 from . import web_urldispatcher
 from . import web_ws
+from . import web_handlers
 from .web_reqrep import *  # noqa
 from .web_exceptions import *  # noqa
 from .web_urldispatcher import *  # noqa
 from .web_ws import *  # noqa
+from .web_handlers import *  # noqa
 from .protocol import HttpVersion  # noqa
 from .signals import Signal, PreSignal, PostSignal
 
@@ -22,6 +24,7 @@ __all__ = (web_reqrep.__all__ +
            web_exceptions.__all__ +
            web_urldispatcher.__all__ +
            web_ws.__all__ +
+           web_handlers.__all__ +
            ('Application', 'RequestHandler',
             'RequestHandlerFactory', 'HttpVersion'))
 
