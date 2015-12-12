@@ -24,10 +24,10 @@ class DirHandler(object):
                              not hasattr(os, "sendfile"))
 
     def __repr__(self):
-        return ("<DirHandler {base_dir:r} sendfile={sendfile} "
+        return ("<DirHandler {base_dir:r} index={index} sendfile={sendfile} "
                 "chunk_size={chunk_size}>").format(
             base_dir=self._basedir, sendfile=not self._no_sendfile,
-            chunk_size=self._chunk_size)
+            chunk_size=self._chunk_size, index=self._index)
 
     def __call__(self, req):
         method = req.method
