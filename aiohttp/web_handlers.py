@@ -114,7 +114,7 @@ class DirHandler(_FileHandlerMixin):
         super().__init__(chunk_size)
 
     def __repr__(self):
-        return ("<DirHandler {base_dir:r} index={index} sendfile={sendfile} "
+        return ("<DirHandler {base_dir!r} index={index} sendfile={sendfile} "
                 "chunk_size={chunk_size}>").format(
             base_dir=self._basedir, sendfile=not self._no_sendfile,
             chunk_size=self._chunk_size, index=self._index)
