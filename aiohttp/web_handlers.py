@@ -91,15 +91,14 @@ class _FileHandlerMixin(object):
     @asyncio.coroutine
     def _get_file(self, req, path, path_stat, response_factory):
         resp = self._head_file(req, path, path_stat, response_factory)
+        yield from resp.prepare(req)
         try:
             fobj = open(path, "rb")
-        except FileNotFoundError:  # in case of race condition
-                raise HTTPNotFound()
+        except FileNotFoundError:  # in case of a race condition
+            raise HTTPNotFound()
         else:
-            yield from resp.prepare(req)
-            yield from self._sendfile(req, resp, fobj, path_stat.st_size)
-        finally:
-            fobj.close()
+            with fobj:
+                yield from self._sendfile(req, resp, fobj, path_stat.st_size)
 
         return resp
 
@@ -116,7 +115,7 @@ class DirHandler(_FileHandlerMixin):
     def __repr__(self):
         return ("<DirHandler {base_dir!r} index={index} sendfile={sendfile} "
                 "chunk_size={chunk_size}>").format(
-            base_dir=self._basedir, sendfile=not self._no_sendfile,
+            base_dir=self._base_dir, sendfile=not self._no_sendfile,
             chunk_size=self._chunk_size, index=self._index)
 
     def __call__(self, req):
@@ -200,12 +199,13 @@ class DirHandler(_FileHandlerMixin):
         req_path, path, path_stat = self._validate_path(req)
 
         if stat.S_ISREG(path_stat):
-            return self._head_file(req, path, path_stat)
+            resp = self._head_file(req, path, path_stat)
         elif self._index and stat.S_ISDIR(path_stat):
             resp = self._head_index(req, path_stat)
-            return resp
         else:
             raise HTTPNotFound()
+
+        return resp
 
     @asyncio.coroutine
     def get(self, req):
