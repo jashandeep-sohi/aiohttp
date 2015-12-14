@@ -7,6 +7,7 @@ import mimetypes
 import re
 import os
 import inspect
+import warnings
 
 from collections.abc import Sized, Iterable, Container
 from urllib.parse import urlencode, unquote
@@ -18,6 +19,7 @@ from .protocol import HttpVersion11
 from .web_exceptions import HTTPMethodNotAllowed, HTTPNotFound, HTTPNotModified
 from .web_reqrep import StreamResponse
 from .multidict import upstr
+from .web_handlers import DirHandler, FileHandler
 
 
 __all__ = ('UrlDispatcher', 'UrlMappingMatchInfo',
@@ -144,11 +146,14 @@ class DynamicRoute(Route):
                         formatter=self._formatter, handler=self.handler))
 
 
+# FIXME: should StaticRoute should be removed altogether?
 class StaticRoute(Route):
 
     def __init__(self, name, prefix, directory, *,
                  expect_handler=None, chunk_size=256*1024,
                  response_factory=StreamResponse):
+        warnings.warn("'StaticRoute' has been deprecated; use "
+                      "'DirHandler' instead", DeprecationWarning)
         assert prefix.startswith('/'), prefix
         assert prefix.endswith('/'), prefix
         super().__init__(
@@ -527,6 +532,10 @@ class UrlDispatcher(AbstractRouter, collections.abc.Mapping):
         :param prefix - url prefix
         :param path - folder with files
         """
+        # FIXME: Perhaps `add_static` should be removed instead of being
+        # deprecated -- or call `add_static_dir`.
+        warnings.warn("'add_static' has been deprecated; use "
+                      "'add_static_dir' instead", DeprecationWarning)
         assert prefix.startswith('/')
         if not prefix.endswith('/'):
             prefix += '/'
@@ -535,4 +544,21 @@ class UrlDispatcher(AbstractRouter, collections.abc.Mapping):
                             chunk_size=chunk_size,
                             response_factory=response_factory)
         self.register_route(route)
+        return route
+
+    def add_static_dir(self, route_prefix, dir_path, *, name=None,
+                       expect_handler=None, chunk_size=None,
+                       response_factory=None):
+        handler = DirHandler(dir_path, chunk_size, response_factory)
+        path = os.path.join(route_prefix, "{path}")
+        route = self.register("*", path, handler, name=name,
+                              expect_handler=expect_handler)
+        return route
+
+    def add_static_file(self, route_path, file_path, *, name=None,
+                        expect_handler=None, chunk_size=None,
+                        response_factory=None):
+        handler = FileHandler(file_path, chunk_size, response_factory)
+        route = self.register("*", route_path, handler, name=name,
+                              expect_handler=expect_handler)
         return route
